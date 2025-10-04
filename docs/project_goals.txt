@@ -1,0 +1,33 @@
+Desafio: Desenvolvimento de um Retriever para RAG em LLM
+
+Importância do RAG
+O RAG é um dos componentes críticos da nossa pipeline, influenciando diretamente a qualidade das respostas do CAI ( aka Comudel AI). 
+
+Por este motivo, o seu Retriever deve ser capaz de encontrar rapidamente os documentos mais pertinentes, otimizando a geração da resposta. 
+
+Um bom retriever melhora a experiência do user ao garantir que o CAI consulta sempre informações relevantes.
+
+Adicionalmente, este desafio permite que te familiarizes com a tecnologia e ferramentas utilizadas na nossa stack, sendo por isso um primeiro contacto prático com os desafios e as soluções que aplicamos no dia-a-dia. 
+
+
+
+Objetivo do desafio
+
+O desafio é desenvolver um sistema RAG, constituído por um Retriever e uma componente de Geração (não é preciso inventar nada de novo aqui). 
+
+
+Assim:
+
+Explorar diferentes abordagens para o retriever: há várias formas, saber analisar as vantagens e desvantagens de cada solução presente no SOTA; implementar a solução mais adequada
+
+Implementar uma componente de Geração para ter um sistema de RAG: usar uma LLM open source e correr isto num notebook do Google Colab, onde é possível aceder gratuitamente a computação acelerada.
+
+Output: Demonstrar os resultados do sistema RAG. Este deve receber um input do user e retornar:
+
+O trecho de documentos mais relevantes, 
+
+Uma resposta gerada pela LLM, baseada nos trechos mais adequados.
+
+Justificar as escolhas tecnológicas e arquiteturais, explicando vantagens e desvantagens de cada abordagem e como foi feito o desenvolvimento. Enviar também o link do notebook do google colab.
+
+Nota: A componente principal de análise do desafio será o retriever.

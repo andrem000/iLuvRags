@@ -1,0 +1,4 @@
+finance:
+  - name: berkshire_annual_report_2024
+    url: https://www.berkshirehathaway.com/2024ar/2024ar.pdf
+    mime: application/pdf
