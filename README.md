@@ -1,6 +1,30 @@
 # iLuvRags
 
-### Step-by-Step Implementation Plan (Index)
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Step-by-Step Overview](#step-by-step-overview)
+  - [Step 1: Setup & Data](#step-1-setup--data)
+  - [Step 2: Embeddings & Storage](#step-2-embeddings--storage)
+  - [Step 3: Tier 1 Retriever – Hybrid](#step-3-tier-1-retriever--hybrid)
+  - [Step 4: Tier 2 Retriever – Re-Ranker](#step-4-tier-2-retriever--re-ranker)
+  - [Step 5: LLM Generation](#step-5-llm-generation)
+  - [Step 6: Evaluation & Demonstration](#step-6-evaluation--demonstration)
+
+## Quick Start
+
+Try the demo immediately:
+
+```python
+# Clone and install
+REPO_URL = "https://github.com/andrem000/iLuvRags.git"
+!git clone -q $REPO_URL
+%cd iLuvRags
+!pip install -q -r requirements.txt
+!python scripts/main.py --queries data/queries.json --device cuda --verbose_retriever --llm Qwen/Qwen2.5-3B-Instruct
+```
+
+## Step-by-Step Overview
 - **Step 1: Setup & Data** — Build/load corpus; chunk to JSONL with provenance
 - **Step 2: Embeddings & Storage** — E5 embeddings + FAISS; save embeddings + metadata
 - **Step 3: Tier 1 Retriever – Hybrid** — Combine FAISS (dense) with BM25 (sparse); return top 10–15
@@ -24,72 +48,8 @@ We use plain Python for ingestion and chunking to keep the pipeline transparent,
 1. Install deps:
    - Local: `pip install -r requirements.txt`
    - Colab: `!pip install -q -r requirements.txt`
-2. Produce `data/chunks.jsonl` (your own pipeline or use the Colab bootstrap below).
+2. Produce `data/chunks.jsonl` (your own pipeline or use the quick start above).
 3. Proceed to Step 2 to build the index from `data/chunks.jsonl`.
-
-### Colab Bootstrap (Single PDF Demo)
-
-Use this to demo with Berkshire 2024 report without a custom ingestion script. It creates `data/chunks.jsonl`, builds the index, and runs the main pipeline.
-
-```python
-# 1) Clone, install
-REPO_URL = "https://github.com/<your-user>/iLuvRags.git"  # replace with your repo URL
-!git clone -q $REPO_URL
-%cd iLuvRags
-!pip install -q -r requirements.txt
-
-# 2) Create chunks.jsonl from a public PDF (Berkshire 2024)
-import os, re, json, requests
-from io import BytesIO
-from pypdf import PdfReader
-
-os.makedirs('data', exist_ok=True)
-url = 'https://www.berkshirehathaway.com/2024ar/2024ar.pdf'
-pdf_bytes = requests.get(url, timeout=60).content
-reader = PdfReader(BytesIO(pdf_bytes))
-text_pages = []
-for p in reader.pages:
-    try:
-        t = p.extract_text() or ''
-    except Exception:
-        t = ''
-    text_pages.append(t)
-full_text = "\n\n".join(text_pages)
-full_text = re.sub(r"\s+", " ", full_text).strip()
-
-def split_words(t, chunk_size=500, overlap=80):
-    words = t.split(' ')
-    chunks = []
-    start = 0
-    while start < len(words):
-        end = min(start + chunk_size, len(words))
-        chunk = ' '.join(words[start:end]).strip()
-        if chunk:
-            chunks.append(chunk)
-        if end == len(words):
-            break
-        start = max(0, end - overlap)
-    return chunks
-
-chunks = split_words(full_text, 500, 80)
-with open('data/chunks.jsonl', 'w', encoding='utf-8') as f:
-    for i, c in enumerate(chunks):
-        rec = {
-            'source': 'berkshire_annual_report_2024',
-            'category': 'finance',
-            'url': url,
-            'doc_mime': 'application/pdf',
-            'chunk_index': i,
-            'text': c,
-        }
-        f.write(json.dumps(rec, ensure_ascii=False) + '\n')
-
-# 3) Build index
-!python scripts/build_index.py --chunks data/chunks.jsonl --out index --model intfloat/e5-base-v2 --batch_size 64
-
-# 4) Run main (Steps 5–6)
-!python scripts/main.py --index index --embed_model intfloat/e5-base-v2 --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 --llm Qwen/Qwen2-7B-Instruct --query "Summarize Item 1A – Risk Factors" --device cpu
-```
 
 ### Step 2: Embeddings & Storage
 
@@ -102,7 +62,7 @@ Build the index:
 pip install -r requirements.txt
 # For CUDA support (faster on GPU):
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-python scripts/build_index.py --chunks data/chunks.jsonl --out index --model intfloat/e5-base-v2 --batch_size 64 --device cuda
+python scripts/build_index.py --device cuda
 # devices: auto | cpu | cuda | cuda:0 | mps
 ```
 
@@ -141,19 +101,11 @@ Minimal sketch (to be implemented next):
 
 Why: Hybrid retrieval captures both meaning (e.g., "contract termination") and exact terms (e.g., "article 45").
 
-Programmatic use:
+Implementation specifics:
 
-```python
-from scripts.retriever import HybridRetriever
-retriever = HybridRetriever(index_dir="index", embed_model_name="intfloat/e5-base-v2", alpha=0.7, verbose=True)
-results = retriever.retrieve("Summarize Item 1A – Risk Factors", k_dense=30, k_sparse=30, k_final=15)
-for r in results[:3]:
-    print(r["score"], r["metadata"], r["text"][:200])
-
-# Build LLM context
-context = retriever.build_context(results, max_chars=3500)
-print(context[:500])
-```
+- Chunking defaults: 500 words per chunk with ~80-word overlap (≈700–1,000 tokens; overlap ≈100–150 tokens). Use these values in demos for better re-ranking.
+- E5 prompt formatting: We prefix chunks with "passage: " when indexing and queries with "query: " at retrieval (shown in code refs below).
+- Score normalization: Before fusion, we apply min–max normalization separately to dense and sparse score lists; then fuse via `final = α * dense_norm + (1 − α) * sparse_norm`.
 
 ### Step 4: Tier 2 Retriever – Re-Ranker (Precision Layer)
 
@@ -180,16 +132,6 @@ domain_hit or               # category in {legal, compliance}
 has_kw or                   # query contains legal/compliance keywords
 (max_fused < 0.35) or       # low confidence peak
 ((max_fused - median) < 0.08)  # flat fused distribution
-```
-
-Programmatic API:
-
-```python
-from scripts.retriever import HybridRetriever
-retriever = HybridRetriever(index_dir="index", verbose=True)
-out = retriever.retrieve_auto("Summarize Item 1A – Risk Factors", k_final=15, top_n_rerank=5)
-print(out["tier2_activated"])  # True/False
-print(len(out["tier1"]), len(out["tier2"]))
 ```
 
 Cache behavior:
