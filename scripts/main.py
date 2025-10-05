@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--index", default="index", help="Index directory")
     p.add_argument("--embed_model", default="intfloat/e5-base-v2", help="Embedding model name")
     p.add_argument("--reranker", default="cross-encoder/ms-marco-MiniLM-L-6-v2", help="CrossEncoder model name")
-    p.add_argument("--llm", default="HuggingFaceH4/zephyr-7b-alpha", help="LLM model name for generation")
+    p.add_argument("--llm", default="Qwen/Qwen2-1.5B-Instruct", help="LLM model name for generation")
     p.add_argument("--query", default=None, help="Single user question")
     p.add_argument("--queries", default=None, help="Path to JSON with queries (schema: {queries: [{question: ...}]})")
     p.add_argument("--device", default=None, help="torch device for LLM, e.g., cuda or cpu")

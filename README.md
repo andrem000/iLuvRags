@@ -88,7 +88,7 @@ with open('data/chunks.jsonl', 'w', encoding='utf-8') as f:
 !python scripts/build_index.py --chunks data/chunks.jsonl --out index --model intfloat/e5-base-v2 --batch_size 64
 
 # 4) Run main (Steps 5–6)
-!python scripts/main.py --index index --embed_model intfloat/e5-base-v2 --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 --llm HuggingFaceH4/zephyr-7b-alpha --query "Summarize Item 1A – Risk Factors" --device cpu
+!python scripts/main.py --index index --embed_model intfloat/e5-base-v2 --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 --llm Qwen/Qwen2-7B-Instruct --query "Summarize Item 1A – Risk Factors" --device cpu
 ```
 
 ### Step 2: Embeddings & Storage
@@ -218,7 +218,7 @@ Display both retrieved snippets and the generated answer.
 Runner (Steps 5–6):
 
 ```bash
-python scripts/main.py --index index --embed_model intfloat/e5-base-v2 --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 --llm HuggingFaceH4/zephyr-7b-alpha --query "Summarize Item 1A – Risk Factors" --device cpu
+python scripts/main.py --index index --embed_model intfloat/e5-base-v2 --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 --llm Qwen/Qwen2-7B-Instruct --query "Summarize Item 1A – Risk Factors" --device cpu
 ```
 
 The runner:
