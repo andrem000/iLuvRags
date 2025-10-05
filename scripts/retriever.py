@@ -145,6 +145,50 @@ class HybridRetriever:
             or (flatness < self.rerank_flat_diff)
         )
 
+    def should_rerank_with_reasons(self, query: str, tier1_results: List[Dict]) -> tuple[bool, Dict]:
+        if not tier1_results:
+            return False, {"empty_tier1": True}
+        tokens = len(query.split())
+        fused_scores = np.array([float(r.get("score", 0.0)) for r in tier1_results], dtype=np.float32)
+        max_s = float(fused_scores.max()) if fused_scores.size > 0 else 0.0
+        med_s = float(np.median(fused_scores)) if fused_scores.size > 0 else 0.0
+        flatness = (max_s - med_s)
+        domain_hit = any((r.get("metadata", {}).get("category") in {"legal", "compliance"}) for r in tier1_results[:3])
+        kw = {"arbitration", "indemnification", "regulation", "clause", "policy"}
+        has_kw = any(w in query.lower() for w in kw)
+
+        cond_tokens = tokens > self.rerank_min_tokens
+        cond_lowmax = max_s < self.rerank_low_max
+        cond_flat = flatness < self.rerank_flat_diff
+        triggers = []
+        if cond_tokens:
+            triggers.append("long_query")
+        if domain_hit:
+            triggers.append("domain_category")
+        if has_kw:
+            triggers.append("keywords")
+        if cond_lowmax:
+            triggers.append("low_peak")
+        if cond_flat:
+            triggers.append("flat_distribution")
+
+        activate = any([cond_tokens, domain_hit, has_kw, cond_lowmax, cond_flat])
+        reasons = {
+            "tokens": tokens,
+            "max_fused": max_s,
+            "median_fused": med_s,
+            "flatness": flatness,
+            "domain_hit": domain_hit,
+            "has_keywords": has_kw,
+            "thresholds": {
+                "min_tokens": self.rerank_min_tokens,
+                "low_max": self.rerank_low_max,
+                "flat_diff": self.rerank_flat_diff,
+            },
+            "triggered_by": triggers,
+        }
+        return activate, reasons
+
     def _get_cross_encoder(self) -> CrossEncoder:
         if self._cross_encoder is None:
             self._cross_encoder = CrossEncoder(self.reranker_model_name, device=self.device)
@@ -186,9 +230,14 @@ class HybridRetriever:
         top_n_rerank: int = 5,
     ) -> dict:
         tier1 = self.retrieve(query, k_dense=k_dense, k_sparse=k_sparse, k_final=k_final)
-        activate = self.should_rerank(query, tier1)
+        activate, reasons = self.should_rerank_with_reasons(query, tier1)
         tier2 = self.rerank(query, tier1, top_n=top_n_rerank) if activate else []
-        return {"tier1": tier1, "tier2": tier2, "tier2_activated": activate}
+        return {
+            "tier1": tier1,
+            "tier2": tier2,
+            "tier2_activated": activate,
+            "tier2_reasons": reasons,
+        }
 
     def build_context(self, retrieved: List[Dict], max_chars: int = 4000) -> str:
         parts: List[str] = []
