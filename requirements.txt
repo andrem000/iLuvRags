@@ -12,7 +12,9 @@ urllib3>=2.2.2
 sentence-transformers>=3.0.1
 # For CUDA support, install PyTorch separately:
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-torch>=2.3.1
+# torch>=2.3.1
 faiss-cpu>=1.8.0.post1
 numpy>=1.26.4
+rank-bm25>=0.2.2
+transformers>=4.44.2
 

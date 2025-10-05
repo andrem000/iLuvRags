@@ -36,12 +36,15 @@ def build_faiss_index(embeddings: np.ndarray) -> faiss.Index:
     return index
 
 
-def save_index(index: faiss.Index, embeddings: np.ndarray, metas: List[Dict], out_dir: str) -> None:
+def save_index(index: faiss.Index, embeddings: np.ndarray, metas: List[Dict], out_dir: str, texts: List[str] | None = None) -> None:
     os.makedirs(out_dir, exist_ok=True)
     faiss.write_index(index, os.path.join(out_dir, "faiss.index"))
     np.save(os.path.join(out_dir, "embeddings.npy"), embeddings)
     with open(os.path.join(out_dir, "metadata.json"), "w", encoding="utf-8") as f:
         json.dump(metas, f, ensure_ascii=False)
+    if texts is not None:
+        with open(os.path.join(out_dir, "texts.json"), "w", encoding="utf-8") as f:
+            json.dump(texts, f, ensure_ascii=False)
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,7 +64,7 @@ def main() -> None:
         raise RuntimeError("No valid chunks found. Did you run scrape_and_chunk.py?")
     embeddings = embed(texts, model_name=args.model, batch_size=args.batch_size, device=args.device)
     index = build_faiss_index(embeddings)
-    save_index(index, embeddings, metas, args.out)
+    save_index(index, embeddings, metas, args.out, texts)
     print(f"Indexed {len(texts)} chunks. Saved FAISS index to {args.out}/faiss.index")
 
 

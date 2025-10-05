@@ -19,52 +19,76 @@ We use plain Python for ingestion and chunking to keep the pipeline transparent,
 
 - **Output format**: JSONL of text chunks with provenance (`source`, `category`, `url`, `doc_mime`, `chunk_index`).
 
-### Design Choices: Retriever Architecture
-
-We evaluated three retriever setups and chose a tiered combination of hybrid retrieval and cross-encoder re-ranking to balance speed and accuracy, especially for real-world, mixed query types and a Google Colab demo.
-
-- **Baseline Dense Retriever — discarded**:
-  - Strong semantic matching but weaker on keyword-/symbol-heavy queries and rare entities.
-  - No lexical recall path; precision lags without re-ranking; fewer explicit speed/quality dials.
-
-- **Hybrid Retriever (dense + sparse) — adopted**:
-  - Dense embeddings (e.g., `intfloat/e5-base-v2`, `sentence-transformers/all-MiniLM-L6-v2`) + BM25.
-  - Score fusion: `final_score = α * dense + (1−α) * sparse` (tunable `α`).
-  - Handles both semantic and exact-term queries; improves recall and robustness.
-
-- **Dense + Cross-Encoder Re-Ranker — adopted**:
-  - Retrieve top N (e.g., 20–50) with the hybrid retriever, then re-rank with a cross-encoder (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2`).
-  - Keep top k (e.g., 3–5) for generation; significantly boosts precision by modeling query–chunk interactions.
-
-- **Speed/Accuracy dials**:
-  - `α`, `k_dense`, `k_sparse`, `N_rerank`, `k_final`, and on/off for re-ranker.
-  - Use hybrid-only for faster responses; enable re-ranking for highest answer quality.
-
-- **Why this tiered combo**:
-  - Hybrid maximizes recall across lexical and semantic intents; the re-ranker maximizes precision.
-  - Together they provide SOTA-leaning retrieval with explicit tradeoffs suitable for Colab-scale demos.
-
 ### Ingestion Quickstart (Local or Colab)
 
 1. Install deps:
    - Local: `pip install -r requirements.txt`
    - Colab: `!pip install -q -r requirements.txt`
-2. Seed sources in `sources.yaml` (provided with one per category).
-3. Run the scraper/chunker:
-   - `python scrape_and_chunk.py --sources sources.yaml --out data/chunks.jsonl`
-4. Output: `data/chunks.jsonl` with chunked text and provenance.
+2. Produce `data/chunks.jsonl` (your own pipeline or use the Colab bootstrap below).
+3. Proceed to Step 2 to build the index from `data/chunks.jsonl`.
 
-### Demo Queries
+### Colab Bootstrap (Single PDF Demo)
 
-Example Tier A/B queries for the Berkshire 2024 report are in `queries.json`.
-Load and iterate:
+Use this to demo with Berkshire 2024 report without a custom ingestion script. It creates `data/chunks.jsonl`, builds the index, and runs the main pipeline.
 
 ```python
-import json
-with open('queries.json', 'r', encoding='utf-8') as f:
-    q = json.load(f)["queries"]
-for item in q:
-    print(item["tier"], item["id"], item["question"])
+# 1) Clone, install
+REPO_URL = "https://github.com/<your-user>/iLuvRags.git"  # replace with your repo URL
+!git clone -q $REPO_URL
+%cd iLuvRags
+!pip install -q -r requirements.txt
+
+# 2) Create chunks.jsonl from a public PDF (Berkshire 2024)
+import os, re, json, requests
+from io import BytesIO
+from pypdf import PdfReader
+
+os.makedirs('data', exist_ok=True)
+url = 'https://www.berkshirehathaway.com/2024ar/2024ar.pdf'
+pdf_bytes = requests.get(url, timeout=60).content
+reader = PdfReader(BytesIO(pdf_bytes))
+text_pages = []
+for p in reader.pages:
+    try:
+        t = p.extract_text() or ''
+    except Exception:
+        t = ''
+    text_pages.append(t)
+full_text = "\n\n".join(text_pages)
+full_text = re.sub(r"\s+", " ", full_text).strip()
+
+def split_words(t, chunk_size=500, overlap=80):
+    words = t.split(' ')
+    chunks = []
+    start = 0
+    while start < len(words):
+        end = min(start + chunk_size, len(words))
+        chunk = ' '.join(words[start:end]).strip()
+        if chunk:
+            chunks.append(chunk)
+        if end == len(words):
+            break
+        start = max(0, end - overlap)
+    return chunks
+
+chunks = split_words(full_text, 500, 80)
+with open('data/chunks.jsonl', 'w', encoding='utf-8') as f:
+    for i, c in enumerate(chunks):
+        rec = {
+            'source': 'berkshire_annual_report_2024',
+            'category': 'finance',
+            'url': url,
+            'doc_mime': 'application/pdf',
+            'chunk_index': i,
+            'text': c,
+        }
+        f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+
+# 3) Build index
+!python scripts/build_index.py --chunks data/chunks.jsonl --out index --model intfloat/e5-base-v2 --batch_size 64
+
+# 4) Run main (Steps 5–6)
+!python scripts/main.py --index index --embed_model intfloat/e5-base-v2 --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 --llm HuggingFaceH4/zephyr-7b-alpha --query "Summarize Item 1A – Risk Factors" --device cpu
 ```
 
 ### Step 2: Embeddings & Storage
@@ -89,6 +113,17 @@ Artifacts:
 
 ### Step 3: Tier 1 Retriever – Hybrid
 
+**Design Rationale**: We evaluated three retriever setups and chose hybrid retrieval to balance speed and accuracy, especially for real-world, mixed query types and Google Colab demos.
+
+- **Baseline Dense Retriever — discarded**:
+  - Strong semantic matching but weaker on keyword-/symbol-heavy queries and rare entities.
+  - No lexical recall path; precision lags without re-ranking; fewer explicit speed/quality dials.
+
+- **Hybrid Retriever (dense + sparse) — adopted**:
+  - Dense embeddings (e.g., `intfloat/e5-base-v2`, `sentence-transformers/all-MiniLM-L6-v2`) + BM25.
+  - Score fusion: `final_score = α * dense + (1−α) * sparse` (tunable `α`).
+  - Handles both semantic and exact-term queries; improves recall and robustness.
+
 - **Goal**: Combine dense semantic retrieval with keyword-based recall.
 - **Dense**: Use FAISS to get top_k (e.g., 20).
 - **Sparse**: Use BM25 (e.g., `rank-bm25`) on raw text.
@@ -106,17 +141,60 @@ Minimal sketch (to be implemented next):
 
 Why: Hybrid retrieval captures both meaning (e.g., "contract termination") and exact terms (e.g., "article 45").
 
+Programmatic use:
+
+```python
+from scripts.retriever import HybridRetriever
+retriever = HybridRetriever(index_dir="index", embed_model_name="intfloat/e5-base-v2", alpha=0.7)
+results = retriever.retrieve("Summarize Item 1A – Risk Factors", k_dense=30, k_sparse=30, k_final=15)
+for r in results[:3]:
+    print(r["score"], r["metadata"], r["text"][:200])
+
+# Build LLM context
+context = retriever.build_context(results, max_chars=3500)
+print(context[:500])
+```
+
 ### Step 4: Tier 2 Retriever – Re-Ranker (Precision Layer)
+
+**Design Rationale**: Cross-encoder re-ranking significantly boosts precision by modeling query–chunk interactions, complementing the hybrid retriever's recall-focused approach.
+
+- **Dense + Cross-Encoder Re-Ranker — adopted**:
+  - Retrieve top N (e.g., 20–50) with the hybrid retriever, then re-rank with a cross-encoder (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2`).
+  - Keep top k (e.g., 3–5) for generation; significantly boosts precision by modeling query–chunk interactions.
+
+- **Speed/Accuracy dials**:
+  - `α`, `k_dense`, `k_sparse`, `N_rerank`, `k_final`, and on/off for re-ranker.
+  - Use hybrid-only for faster responses; enable re-ranking for highest answer quality.
 
 - **Model**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (via `sentence_transformers.CrossEncoder`).
 - **Input**: top_k from Tier 1 (e.g., 15); score pairs (query, chunk).
 - **Keep**: top_n (e.g., 3–5) by cross-encoder score.
 
-Simple activation logic:
+Auto-activation policy (default):
 
 ```python
-use_reranker = len(query.split()) > 8 or ("legal" in query.lower())
+# Enabled when any condition is true
+(tokens > 10) or            # long/complex query
+domain_hit or               # category in {legal, compliance}
+has_kw or                   # query contains legal/compliance keywords
+(max_fused < 0.35) or       # low confidence peak
+((max_fused - median) < 0.08)  # flat fused distribution
 ```
+
+Programmatic API:
+
+```python
+from scripts.retriever import HybridRetriever
+retriever = HybridRetriever(index_dir="index")
+out = retriever.retrieve_auto("Summarize Item 1A – Risk Factors", k_final=15, top_n_rerank=5)
+print(out["tier2_activated"])  # True/False
+print(len(out["tier1"]), len(out["tier2"]))
+```
+
+**Why this tiered combo**:
+- Hybrid maximizes recall across lexical and semantic intents; the re-ranker maximizes precision.
+- Together they provide SOTA-leaning retrieval with explicit tradeoffs suitable for Colab-scale demos.
 
 ### Step 5: LLM Generation
 
@@ -136,6 +214,17 @@ Answer:
 ```
 
 Display both retrieved snippets and the generated answer.
+
+Runner (Steps 5–6):
+
+```bash
+python scripts/main.py --index index --embed_model intfloat/e5-base-v2 --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 --llm HuggingFaceH4/zephyr-7b-alpha --query "Summarize Item 1A – Risk Factors" --device cpu
+```
+
+The runner:
+- Uses `retrieve_auto` to decide Tier 2 activation
+- Builds context(s) and generates with the chosen LLM
+- Prints a JSON with Tier 1 and Tier 2 answers
 
 ### Step 6: Evaluation & Demonstration
 
