@@ -145,7 +145,7 @@ Programmatic use:
 
 ```python
 from scripts.retriever import HybridRetriever
-retriever = HybridRetriever(index_dir="index", embed_model_name="intfloat/e5-base-v2", alpha=0.7)
+retriever = HybridRetriever(index_dir="index", embed_model_name="intfloat/e5-base-v2", alpha=0.7, verbose=True)
 results = retriever.retrieve("Summarize Item 1A – Risk Factors", k_dense=30, k_sparse=30, k_final=15)
 for r in results[:3]:
     print(r["score"], r["metadata"], r["text"][:200])
@@ -186,11 +186,16 @@ Programmatic API:
 
 ```python
 from scripts.retriever import HybridRetriever
-retriever = HybridRetriever(index_dir="index")
+retriever = HybridRetriever(index_dir="index", verbose=True)
 out = retriever.retrieve_auto("Summarize Item 1A – Risk Factors", k_final=15, top_n_rerank=5)
 print(out["tier2_activated"])  # True/False
 print(len(out["tier1"]), len(out["tier2"]))
 ```
+
+Cache behavior:
+
+- Query embeddings are cached at `index/query_cache.pkl` keyed by `(model, query)`.
+- Run twice with the same query and `verbose=True` to see `[cache] hit`/`save` messages.
 
 **Why this tiered combo**:
 - Hybrid maximizes recall across lexical and semantic intents; the re-ranker maximizes precision.
@@ -218,7 +223,7 @@ Display both retrieved snippets and the generated answer.
 Runner (Steps 5–6):
 
 ```bash
-python scripts/main.py --index index --embed_model intfloat/e5-base-v2 --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 --llm Qwen/Qwen2-7B-Instruct --query "Summarize Item 1A – Risk Factors" --device cpu
+python scripts/main.py --queries data/queries.json
 ```
 
 The runner:

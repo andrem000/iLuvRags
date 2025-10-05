@@ -10,7 +10,7 @@ from retriever import HybridRetriever
 
 def generate_answer(model_name: str, prompt: str, device: str | None = None, max_new_tokens: int = 256) -> str:
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16 if device and device.startswith("cuda") else None)
+    model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float16 if device and device.startswith("cuda") else None)
     if device:
         model = model.to(device)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default=None, help="torch device for LLM, e.g., cuda or cpu")
     p.add_argument("--k_final", type=int, default=15)
     p.add_argument("--top_n_rerank", type=int, default=5)
+    p.add_argument("--verbose_retriever", action="store_true", help="Enable verbose cache logs for retriever")
     return p.parse_args()
 
 
@@ -52,13 +53,14 @@ def main() -> None:
         index_dir=args.index,
         embed_model_name=args.embed_model,
         reranker_model_name=args.reranker,
+        verbose=args.verbose_retriever,
     )
 
     # Prepare LLM once
     tokenizer = AutoTokenizer.from_pretrained(args.llm)
     model = AutoModelForCausalLM.from_pretrained(
         args.llm,
-        torch_dtype=torch.float16 if args.device and args.device.startswith("cuda") else None,
+        dtype=torch.float16 if args.device and args.device.startswith("cuda") else None,
     )
     if args.device:
         model = model.to(args.device)

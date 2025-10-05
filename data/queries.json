@@ -1,15 +1,10 @@
 {
   "dataset": "berkshire_annual_report_2024",
   "queries": [
-    { "id": "A1", "tier": "A", "question": "List the main business segments mentioned in the report." },
-    { "id": "A2", "tier": "A", "question": "Briefly summarize Item 1A – Risk Factors." },
-    { "id": "A3", "tier": "A", "question": "What is ‘insurance float’ as described in the report?" },
-
-    { "id": "B1", "tier": "B", "question": "According to Item 1A, what are the top risks related to insurance underwriting volatility?" },
-    { "id": "B2", "tier": "B", "question": "What does the report state about share repurchases and the conditions for buybacks?" },
-    { "id": "B3", "tier": "B", "question": "From the Notes, summarize the accounting policy for revenue recognition or goodwill." },
-    { "id": "B4", "tier": "B", "question": "Report key figures for cash and cash equivalents at year-end 2024 and compare to 2023." },
-    { "id": "B5", "tier": "B", "question": "Describe the capital allocation priorities and how acquisition candidates are evaluated, as stated by management." }
+    { "id": "Q1", "tier": "A", "question": "List the main business segments mentioned in the report." },
+    { "id": "Q2", "tier": "B", "question": "According to Item 1A, what are the top risks related to insurance underwriting volatility?" },
+    { "id": "Q3", "tier": "B", "question": "Cite the policy or clause on share repurchases and cash thresholds, with short quotes." },
+    { "id": "Q1_repeat", "tier": "A", "question": "List the main business segments mentioned in the report." }
   ]
 }
 

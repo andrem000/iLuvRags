@@ -1,4 +1,5 @@
 import json
+import pickle
 import os
 import re
 from typing import Dict, List, Tuple
@@ -25,6 +26,8 @@ class HybridRetriever:
         rerank_min_tokens: int = 10,
         rerank_low_max: float = 0.35,
         rerank_flat_diff: float = 0.08,
+        cache_path: str | None = None,
+        verbose: bool = False,
     ) -> None:
         self.index = faiss.read_index(os.path.join(index_dir, "faiss.index"))
         self.embeddings = np.load(os.path.join(index_dir, "embeddings.npy"))
@@ -61,6 +64,7 @@ class HybridRetriever:
         self.bm25 = BM25Okapi(tokenized_nonempty)
 
         # Dense model
+        self.embed_model_name = embed_model_name
         self.model = SentenceTransformer(embed_model_name, device=device)
         self.alpha = alpha
         self.device = device
@@ -73,9 +77,37 @@ class HybridRetriever:
         self.rerank_low_max = rerank_low_max
         self.rerank_flat_diff = rerank_flat_diff
 
+        # Query embedding cache (persistent)
+        self.cache_path = cache_path or os.path.join(index_dir, "query_cache.pkl")
+        self._query_cache: dict[tuple[str, str], list[float]] = {}
+        self.verbose = verbose
+        try:
+            if os.path.exists(self.cache_path):
+                with open(self.cache_path, "rb") as pf:
+                    self._query_cache = pickle.load(pf) or {}
+                if self.verbose:
+                    print(f"[cache] loaded {len(self._query_cache)} entries from {self.cache_path}")
+        except Exception:
+            self._query_cache = {}
+
     def _embed_query(self, query: str) -> np.ndarray:
+        key = (self.embed_model_name, query)
+        cached = self._query_cache.get(key)
+        if cached is not None:
+            if self.verbose:
+                print(f"[cache] hit for query using {self.embed_model_name}")
+            return np.asarray(cached, dtype="float32").reshape(1, -1)
         q = f"query: {query}"
         vec = self.model.encode([q], convert_to_numpy=True, normalize_embeddings=True)
+        # Persist
+        try:
+            self._query_cache[key] = vec[0].astype("float32").tolist()
+            with open(self.cache_path, "wb") as pf:
+                pickle.dump(self._query_cache, pf)
+            if self.verbose:
+                print(f"[cache] save -> {self.cache_path}")
+        except Exception:
+            pass
         return vec.astype("float32")
 
     def _dense_search(self, query: str, k: int) -> Tuple[np.ndarray, np.ndarray]:
