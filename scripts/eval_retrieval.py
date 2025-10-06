@@ -3,6 +3,8 @@ import csv
 import json
 from typing import Dict, List, Set
 
+import matplotlib.pyplot as plt
+
 from retriever import HybridRetriever
 
 
@@ -55,6 +57,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--labels_csv", required=True, help="CSV with columns: query_id,relevant_doc_ids (comma-separated chunk indices)")
     p.add_argument("--k", type=int, default=10, help="k for Recall@k and MRR@k")
     p.add_argument("--top_n_rerank", type=int, default=5)
+    p.add_argument("--chart", action="store_true", help="Show a bar chart for Recall@k (Tier1 vs Tier2)")
     return p.parse_args()
 
 
@@ -116,7 +119,21 @@ def main() -> None:
         "num_queries": n,
     }
 
-    print(json.dumps({"aggregate": agg, "per_query": per_query}, ensure_ascii=False, indent=2))
+    result_json = {"aggregate": agg, "per_query": per_query}
+    print(json.dumps(result_json, ensure_ascii=False, indent=2))
+
+    if args.chart:
+        labels = ["Hybrid (Tier1)", "+Rerank (Tier2)"]
+        values = [agg["Recall@k_Tier1"], agg["Recall@k_Tier2"]]
+        plt.figure(figsize=(4, 3))
+        bars = plt.bar(labels, values, color=["#4C78A8", "#F58518"])
+        for b, v in zip(bars, values):
+            plt.text(b.get_x() + b.get_width() / 2, v + 0.01, f"{v:.2f}", ha="center", va="bottom")
+        plt.ylim(0, 1.05)
+        plt.ylabel(f"Recall@{args.k}")
+        plt.title("Hybrid vs +Rerank")
+        plt.tight_layout()
+        plt.show()
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ def generate_answer(model_name: str, prompt: str, device: str | None = None, max
 
 
 def build_prompt(context: str, question: str) -> str:
-    return f"""You are a concise assistant. Use only the provided context.
+    return f"""You are a concise assistant. Use ONLY the provided context. If the context doesn't contain enough information to answer the question, say "I don't know" or "The provided context doesn't contain enough information to answer this question."
 
 Context:
 {context}
@@ -45,6 +45,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--top_n_rerank", type=int, default=5)
     p.add_argument("--verbose_retriever", action="store_true", help="Enable verbose cache logs for retriever")
     p.add_argument("--pretty", action="store_true", help="Pretty-print retrieval results with citations and URLs")
+    p.add_argument("--allow_low_conf_gen", action="store_true", help="Force generation even if retrieval is low-confidence")
     return p.parse_args()
 
 
@@ -81,10 +82,12 @@ def main() -> None:
             url = meta.get("url", "")
             cite = _fmt_citation(meta)
             score = it.get("score", 0.0)
+            dense_score = it.get("dense_score", 0.0)
+            sparse_score = it.get("sparse_score", 0.0)
             snippet = (it.get("text", "") or "").strip().replace("\n", " ")
             if len(snippet) > 200:
                 snippet = snippet[:200] + "..."
-            print(f"  {i:>2}. {cite} score={score:.3f}")
+            print(f"  {i:>2}. {cite} fused={score:.3f} (dense={dense_score:.3f} sparse={sparse_score:.3f})")
             if url:
                 print(f"      URL: {url}")
             if snippet:
@@ -120,13 +123,22 @@ def main() -> None:
                     float(timing.get("rerank_ms", 0.0)),
                     float(timing.get("total_ms", 0.0)),
                 ))
+            if out.get("low_confidence"):
+                reasons = out.get("low_confidence_reasons", {})
+                print("\n[guardrail] Low-confidence retrieval detected:")
+                print(json.dumps(reasons, ensure_ascii=False, indent=2))
             _pretty_print(question, "Tier1", out.get("tier1", []))
             if out.get("tier2_activated"):
                 _pretty_print(question, "Tier2 (reranked)", out.get("tier2", []))
-            print("\n=== Answers ===")
-            print("Tier1:", ans_t1)
-            if ans_t2 is not None:
-                print("\nTier2:", ans_t2)
+            # Answer printing may be suppressed if low-confidence and not allowed
+            if not out.get("low_confidence") or args.allow_low_conf_gen:
+                print("\n=== Answers ===")
+                print("Tier1:", ans_t1)
+                if ans_t2 is not None:
+                    print("\nTier2:", ans_t2)
+            else:
+                print("\n=== Answers ===")
+                print("Guardrail: Insufficient retrieval confidence; skipping generation. Try refining the query.")
 
         return {
             "question": question,

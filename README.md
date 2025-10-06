@@ -103,9 +103,16 @@ Why: Hybrid retrieval captures both meaning (e.g., "contract termination") and e
 
 Implementation specifics:
 
-- Chunking defaults: 500 words per chunk with ~80-word overlap (≈700–1,000 tokens; overlap ≈100–150 tokens). Use these values in demos for better re-ranking. You can override via `scripts/scrape_and_chunk.py --chunk_size 500 --chunk_overlap 80`.
-- E5 prompt formatting: We prefix chunks with "passage: " when indexing and queries with "query: " at retrieval (shown in code refs below).
-- Score normalization: Before fusion, we apply min–max normalization separately to dense and sparse score lists; then fuse via `final = α * dense_norm + (1 − α) * sparse_norm`.
+- **Chunking defaults** (standardized across codebase):
+  | Parameter | Default | Token Equivalent | CLI Override |
+  |-----------|---------|------------------|--------------|
+  | `chunk_size` | 500 words | ~700–1,000 tokens | `--chunk_size` |
+  | `chunk_overlap` | 80 words | ~100–150 tokens | `--chunk_overlap` |
+  
+  Use these values in demos for better re-ranking. Override via `scripts/scrape_and_chunk.py --chunk_size 500 --chunk_overlap 80`.
+
+- **E5 prompt formatting**: We prefix chunks with "passage: " when indexing and queries with "query: " at retrieval (shown in code refs below).
+- **Score normalization**: Before fusion, we apply min–max normalization separately to dense and sparse score lists; then fuse via `final = α * dense_norm + (1 − α) * sparse_norm`.
 
 ### Step 4: Tier 2 Retriever – Re-Ranker (Precision Layer)
 
@@ -184,6 +191,13 @@ python scripts/main.py --queries data/queries.json --pretty
 Output includes:
 - Tier1 and Tier2 rows: `[source#chunk] score=...` and `URL`
 - Timings (ms) for dense, sparse, fusion, rerank, total
+- Dense/sparse breakdown per result in pretty mode
+
+### Low-Confidence Guardrail
+
+- Retrieval marks a query as low-confidence if fused scores are too low/flat or too few results exceed a small threshold.
+- When `--pretty` is used, reasons are shown. By default, generation is suppressed in low-confidence cases.
+- Override with `--allow_low_conf_gen` to force generation.
 
 ### Retrieval Evaluation (Recall@k, MRR)
 
@@ -199,7 +213,8 @@ Run:
 python scripts/eval_retrieval.py \
   --queries_json data/queries.json \
   --labels_csv data/labels.csv \
-  --k 10
+  --k 10 \
+  --chart
 ```
 
 This prints aggregate `Recall@k` and `MRR@k` for Tier1 and Tier2 and per-query breakdown.

@@ -3,6 +3,8 @@ import pickle
 import os
 import re
 import time
+import hashlib
+from collections import OrderedDict
 from typing import Dict, List, Tuple
 
 import faiss
@@ -28,6 +30,13 @@ class HybridRetriever:
         rerank_low_max: float = 0.35,
         rerank_flat_diff: float = 0.08,
         cache_path: str | None = None,
+        query_cache_max_entries: int = 2000,
+        bm25_cache_path: str | None = None,
+        bm25_cache_max_versions: int = 3,
+        # Low-confidence guardrail defaults
+        low_conf_max_threshold: float = 0.30,
+        low_conf_flat_diff: float = 0.08,
+        low_conf_min_hits: int = 2,
         verbose: bool = False,
     ) -> None:
         self.index = faiss.read_index(os.path.join(index_dir, "faiss.index"))
@@ -58,10 +67,55 @@ class HybridRetriever:
                     "Please rebuild the index with scripts/build_index.py to generate texts.json."
                 )
 
-        # Sparse index (BM25 over non-empty docs)
-        tokenized_all = [_tokenize(t) for t in self.texts]
-        self.nonempty_indices = [i for i, toks in enumerate(tokenized_all) if len(toks) > 0]
-        tokenized_nonempty = [tokenized_all[i] for i in self.nonempty_indices] or [["dummy"]]
+        # Sparse index (BM25 over non-empty docs) with tokenization cache
+        self.bm25_cache_path = bm25_cache_path or os.path.join(index_dir, "bm25_cache.pkl")
+        self.bm25_cache_max_versions = max(1, int(bm25_cache_max_versions))
+        texts_path_mtime = 0.0
+        texts_path_size = 0
+        try:
+            texts_path_mtime = os.path.getmtime(texts_path)
+            texts_path_size = os.path.getsize(texts_path)
+        except Exception:
+            pass
+        version_key = f"len={len(self.texts)}|size={texts_path_size}|mtime={int(texts_path_mtime)}"
+
+        bm25_cache: "OrderedDict[str, dict]" = OrderedDict()
+        try:
+            if os.path.exists(self.bm25_cache_path):
+                with open(self.bm25_cache_path, "rb") as cf:
+                    loaded = pickle.load(cf)
+                if isinstance(loaded, dict):
+                    bm25_cache = OrderedDict(loaded)
+        except Exception:
+            bm25_cache = OrderedDict()
+
+        if version_key in bm25_cache:
+            entry = bm25_cache.pop(version_key)
+            bm25_cache[version_key] = entry  # move to end (recent)
+            self.nonempty_indices = entry.get("nonempty_indices", [])
+            tokenized_nonempty = entry.get("tokenized_nonempty", [["dummy"]])
+        else:
+            tokenized_all = [_tokenize(t) for t in self.texts]
+            self.nonempty_indices = [i for i, toks in enumerate(tokenized_all) if len(toks) > 0]
+            tokenized_nonempty = [tokenized_all[i] for i in self.nonempty_indices] or [["dummy"]]
+            # save
+            bm25_cache[version_key] = {
+                "nonempty_indices": self.nonempty_indices,
+                "tokenized_nonempty": tokenized_nonempty,
+            }
+            while len(bm25_cache) > self.bm25_cache_max_versions:
+                try:
+                    bm25_cache.popitem(last=False)
+                except Exception:
+                    break
+            try:
+                with open(self.bm25_cache_path, "wb") as cf:
+                    pickle.dump(dict(bm25_cache), cf)
+                if self.verbose:
+                    print(f"[bm25_cache] save -> {self.bm25_cache_path} (versions={len(bm25_cache)})")
+            except Exception:
+                pass
+
         self.bm25 = BM25Okapi(tokenized_nonempty)
 
         # Dense model
@@ -80,16 +134,24 @@ class HybridRetriever:
 
         # Query embedding cache (persistent)
         self.cache_path = cache_path or os.path.join(index_dir, "query_cache.pkl")
-        self._query_cache: dict[tuple[str, str], list[float]] = {}
+        self.query_cache_max_entries = max(1, int(query_cache_max_entries))
+        self._query_cache: "OrderedDict[tuple[str, str], list[float]]" = OrderedDict()
         self.verbose = verbose
         try:
             if os.path.exists(self.cache_path):
                 with open(self.cache_path, "rb") as pf:
-                    self._query_cache = pickle.load(pf) or {}
+                    loaded_q = pickle.load(pf) or {}
+                    if isinstance(loaded_q, dict):
+                        self._query_cache = OrderedDict(loaded_q)
                 if self.verbose:
                     print(f"[cache] loaded {len(self._query_cache)} entries from {self.cache_path}")
         except Exception:
-            self._query_cache = {}
+            self._query_cache = OrderedDict()
+
+        # Guardrail thresholds
+        self.low_conf_max_threshold = float(low_conf_max_threshold)
+        self.low_conf_flat_diff = float(low_conf_flat_diff)
+        self.low_conf_min_hits = max(0, int(low_conf_min_hits))
 
     def _embed_query(self, query: str) -> np.ndarray:
         key = (self.embed_model_name, query)
@@ -97,14 +159,25 @@ class HybridRetriever:
         if cached is not None:
             if self.verbose:
                 print(f"[cache] hit for query using {self.embed_model_name}")
+            # refresh LRU order
+            try:
+                self._query_cache.move_to_end(key)
+            except Exception:
+                pass
             return np.asarray(cached, dtype="float32").reshape(1, -1)
         q = f"query: {query}"
         vec = self.model.encode([q], convert_to_numpy=True, normalize_embeddings=True)
         # Persist
         try:
             self._query_cache[key] = vec[0].astype("float32").tolist()
+            # cap size
+            while len(self._query_cache) > self.query_cache_max_entries:
+                try:
+                    self._query_cache.popitem(last=False)
+                except Exception:
+                    break
             with open(self.cache_path, "wb") as pf:
-                pickle.dump(self._query_cache, pf)
+                pickle.dump(dict(self._query_cache), pf)
             if self.verbose:
                 print(f"[cache] save -> {self.cache_path}")
         except Exception:
@@ -159,7 +232,16 @@ class HybridRetriever:
         results: List[Dict] = []
         for idx, score in ranked:
             if 0 <= idx < len(self.texts):
-                results.append({"score": float(score), "text": self.texts[idx], "metadata": self.metas[idx]})
+                # Get individual scores for this item
+                dense_score = float(dense_norm[np.where(dense_idxs == idx)[0][0]]) if idx in dense_idxs else 0.0
+                sparse_score = float(sparse_norm[np.where(top_sparse_idxs == idx)[0][0]]) if idx in top_sparse_idxs else 0.0
+                results.append({
+                    "score": float(score), 
+                    "dense_score": dense_score,
+                    "sparse_score": sparse_score,
+                    "text": self.texts[idx], 
+                    "metadata": self.metas[idx]
+                })
         t3 = time.perf_counter()
         timing = {
             "dense_ms": (t1 - t0) * 1000.0,
@@ -282,6 +364,31 @@ class HybridRetriever:
     ) -> dict:
         tier1, t_t1 = self._retrieve_with_timing(query, k_dense=k_dense, k_sparse=k_sparse, k_final=k_final)
         activate, reasons = self.should_rerank_with_reasons(query, tier1)
+        # Low-confidence guardrail signals
+        fused_scores = np.array([float(r.get("score", 0.0)) for r in tier1], dtype=np.float32)
+        max_s = float(fused_scores.max()) if fused_scores.size > 0 else 0.0
+        med_s = float(np.median(fused_scores)) if fused_scores.size > 0 else 0.0
+        num_hits = int((fused_scores >= 0.15).sum()) if fused_scores.size > 0 else 0
+        low_confidence = (
+            (max_s < self.low_conf_max_threshold)
+            or ((max_s - med_s) < self.low_conf_flat_diff)
+            or (num_hits < self.low_conf_min_hits)
+        )
+        low_conf_reasons = {
+            "max_fused": max_s,
+            "median_fused": med_s,
+            "num_hits_ge_0.15": num_hits,
+            "thresholds": {
+                "max_threshold": self.low_conf_max_threshold,
+                "flat_diff": self.low_conf_flat_diff,
+                "min_hits": self.low_conf_min_hits,
+            },
+            "triggered": {
+                "low_max": (max_s < self.low_conf_max_threshold),
+                "flat": ((max_s - med_s) < self.low_conf_flat_diff),
+                "few_hits": (num_hits < self.low_conf_min_hits),
+            },
+        }
         t_r0 = time.perf_counter()
         tier2 = self.rerank(query, tier1, top_n=top_n_rerank) if activate else []
         t_r1 = time.perf_counter()
@@ -293,13 +400,17 @@ class HybridRetriever:
             "tier2": tier2,
             "tier2_activated": activate,
             "tier2_reasons": reasons,
+            "low_confidence": low_confidence,
+            "low_confidence_reasons": low_conf_reasons,
             "timing": timing,
         }
 
-    def build_context(self, retrieved: List[Dict], max_chars: int = 4000) -> str:
+    def build_context(self, retrieved: List[Dict], max_chars: int = 4000, max_snippets: int = 5) -> str:
         parts: List[str] = []
         total = 0
-        for item in retrieved:
+        for i, item in enumerate(retrieved):
+            if i >= max_snippets:
+                break
             header = f"Source: {item['metadata'].get('source','')} (chunk {item['metadata'].get('chunk_index','')})\nURL: {item['metadata'].get('url','')}\n"
             body = item["text"].strip()
             piece = header + body + "\n\n"

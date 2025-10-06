@@ -4,7 +4,8 @@
     { "id": "Q1", "tier": "A", "question": "List the main business segments mentioned in the report." },
     { "id": "Q2", "tier": "B", "question": "According to Item 1A, what are the top risks related to insurance underwriting volatility?" },
     { "id": "Q3", "tier": "B", "question": "Cite the policy or clause on share repurchases and cash thresholds, with short quotes." },
-    { "id": "Q1_repeat", "tier": "A", "question": "List the main business segments mentioned in the report." }
+    { "id": "Q1_repeat", "tier": "A", "question": "List the main business segments mentioned in the report." },
+    { "id": "Q_low_conf", "tier": "Z", "question": "What is the capital city of Zamunda and its current population?" }
   ]
 }
 
