@@ -86,6 +86,8 @@ class HybridRetriever:
                     loaded = pickle.load(cf)
                 if isinstance(loaded, dict):
                     bm25_cache = OrderedDict(loaded)
+                    if self.verbose:
+                        print(f"[bm25_cache] loaded {len(bm25_cache)} versions from {self.bm25_cache_path}")
         except Exception:
             bm25_cache = OrderedDict()
 
@@ -94,6 +96,8 @@ class HybridRetriever:
             bm25_cache[version_key] = entry  # move to end (recent)
             self.nonempty_indices = entry.get("nonempty_indices", [])
             tokenized_nonempty = entry.get("tokenized_nonempty", [["dummy"]])
+            if self.verbose:
+                print(f"[bm25_cache] hit for version {version_key}")
         else:
             tokenized_all = [_tokenize(t) for t in self.texts]
             self.nonempty_indices = [i for i, toks in enumerate(tokenized_all) if len(toks) > 0]
