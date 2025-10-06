@@ -219,6 +219,25 @@ python scripts/eval_retrieval.py \
 
 This prints aggregate `Recall@k` and `MRR@k` for Tier1 and Tier2 and per-query breakdown.
 
+### Alpha Sweeper (choose α for fusion)
+
+Run a small grid of α values to find the best tradeoff for your dataset:
+
+```bash
+python scripts/alpha_sweeper.py \
+  --queries_json data/queries.json \
+  --labels_csv data/labels.csv \
+  --k 10 \
+  --alphas 0.5,0.65,0.7,0.8 \
+  --chart
+```
+
+This prints a table of metrics per α and the best α by Recall@k/MRR@k, with an optional chart.
+
+Notes on α selection:
+- Alpha sweeper (dataset-level): simple and robust when you have a small eval set.
+- Query-aware α (per-query): can further improve retrieval by adapting to query style (digits/symbols/keywords vs natural language), but is more complex and can overfit small eval sets. We use the sweeper by default for clarity and reproducibility, and may add query-aware α later as an optional mode.
+
 ### Step 6: Evaluation & Demonstration
 
 - **Goal**: Show that Tier 2 improves quality.
