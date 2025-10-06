@@ -89,16 +89,6 @@ Artifacts:
 - **Sparse**: Use BM25 (e.g., `rank-bm25`) on raw text.
 - **Fusion**: Normalize and merge scores: \( final\_score = \alpha \cdot dense + (1-\alpha) \cdot bm25 \).
 
-Minimal sketch (to be implemented next):
-
-```python
-# 1) Query embed with E5 using "query: <text>"
-# 2) FAISS search -> dense_scores, idxs
-# 3) BM25 over all texts -> bm25_scores for same idxs
-# 4) Normalize both to [0,1], then fuse with alpha
-# 5) Take top 10–15 by fused score
-```
-
 Why: Hybrid retrieval captures both meaning (e.g., "contract termination") and exact terms (e.g., "article 45").
 
 Implementation specifics:
