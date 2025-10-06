@@ -2,6 +2,7 @@ import json
 import pickle
 import os
 import re
+import time
 from typing import Dict, List, Tuple
 
 import faiss
@@ -135,9 +136,12 @@ class HybridRetriever:
             return np.zeros_like(scores)
         return (scores - smin) / (smax - smin)
 
-    def retrieve(self, query: str, k_dense: int = 30, k_sparse: int = 30, k_final: int = 15) -> List[Dict]:
+    def _retrieve_with_timing(self, query: str, k_dense: int, k_sparse: int, k_final: int) -> Tuple[List[Dict], Dict[str, float]]:
+        t0 = time.perf_counter()
         dense_scores, dense_idxs = self._dense_search(query, k_dense)
+        t1 = time.perf_counter()
         sparse_scores_full = self._sparse_scores_full(query)
+        t2 = time.perf_counter()
 
         dense_norm = self._normalize(dense_scores)
         # take top sparse
@@ -155,7 +159,17 @@ class HybridRetriever:
         results: List[Dict] = []
         for idx, score in ranked:
             if 0 <= idx < len(self.texts):
-                results.append({"score": score, "text": self.texts[idx], "metadata": self.metas[idx]})
+                results.append({"score": float(score), "text": self.texts[idx], "metadata": self.metas[idx]})
+        t3 = time.perf_counter()
+        timing = {
+            "dense_ms": (t1 - t0) * 1000.0,
+            "sparse_ms": (t2 - t1) * 1000.0,
+            "fusion_ms": (t3 - t2) * 1000.0,
+        }
+        return results, timing
+
+    def retrieve(self, query: str, k_dense: int = 30, k_sparse: int = 30, k_final: int = 15) -> List[Dict]:
+        results, _ = self._retrieve_with_timing(query, k_dense=k_dense, k_sparse=k_sparse, k_final=k_final)
         return results
 
     def should_rerank(self, query: str, tier1_results: List[Dict]) -> bool:
@@ -249,9 +263,14 @@ class HybridRetriever:
         k_final: int = 15,
         top_n_rerank: int = 5,
     ) -> dict:
-        tier1 = self.retrieve(query, k_dense=k_dense, k_sparse=k_sparse, k_final=k_final)
+        tier1, t_t1 = self._retrieve_with_timing(query, k_dense=k_dense, k_sparse=k_sparse, k_final=k_final)
+        t_r0 = time.perf_counter()
         tier2 = self.rerank(query, tier1, top_n=top_n_rerank)
-        return {"tier1": tier1, "tier2": tier2}
+        t_r1 = time.perf_counter()
+        timing = dict(t_t1)
+        timing["rerank_ms"] = (t_r1 - t_r0) * 1000.0
+        timing["total_ms"] = timing.get("dense_ms", 0.0) + timing.get("sparse_ms", 0.0) + timing.get("fusion_ms", 0.0) + timing.get("rerank_ms", 0.0)
+        return {"tier1": tier1, "tier2": tier2, "timing": timing}
 
     def retrieve_auto(
         self,
@@ -261,14 +280,20 @@ class HybridRetriever:
         k_final: int = 15,
         top_n_rerank: int = 5,
     ) -> dict:
-        tier1 = self.retrieve(query, k_dense=k_dense, k_sparse=k_sparse, k_final=k_final)
+        tier1, t_t1 = self._retrieve_with_timing(query, k_dense=k_dense, k_sparse=k_sparse, k_final=k_final)
         activate, reasons = self.should_rerank_with_reasons(query, tier1)
+        t_r0 = time.perf_counter()
         tier2 = self.rerank(query, tier1, top_n=top_n_rerank) if activate else []
+        t_r1 = time.perf_counter()
+        timing = dict(t_t1)
+        timing["rerank_ms"] = (t_r1 - t_r0) * 1000.0 if activate else 0.0
+        timing["total_ms"] = timing.get("dense_ms", 0.0) + timing.get("sparse_ms", 0.0) + timing.get("fusion_ms", 0.0) + timing.get("rerank_ms", 0.0)
         return {
             "tier1": tier1,
             "tier2": tier2,
             "tier2_activated": activate,
             "tier2_reasons": reasons,
+            "timing": timing,
         }
 
     def build_context(self, retrieved: List[Dict], max_chars: int = 4000) -> str:

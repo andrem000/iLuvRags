@@ -112,7 +112,7 @@ def normalize_whitespace(text: str) -> str:
     return text.strip()
 
 
-def split_into_chunks(text: str, chunk_size: int = 1200, chunk_overlap: int = 200) -> List[str]:
+def split_into_chunks(text: str, chunk_size: int = 500, chunk_overlap: int = 80) -> List[str]:
     if not text:
         return []
     words = text.split(" ")
@@ -210,8 +210,8 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Fetch sources, parse, and chunk into JSONL")
     p.add_argument("--sources", default="sources.yaml", help="Path to YAML listing sources")
     p.add_argument("--out", default="data/chunks.jsonl", help="Output JSONL path")
-    p.add_argument("--chunk_size", type=int, default=1200, help="Chunk size in words")
-    p.add_argument("--chunk_overlap", type=int, default=200, help="Overlap in words")
+    p.add_argument("--chunk_size", type=int, default=500, help="Chunk size in words")
+    p.add_argument("--chunk_overlap", type=int, default=80, help="Overlap in words")
     return p.parse_args()
 
 

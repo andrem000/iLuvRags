@@ -1,6 +1,6 @@
 import argparse
 import json
-from typing import Dict
+from typing import Dict, List
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--k_final", type=int, default=15)
     p.add_argument("--top_n_rerank", type=int, default=5)
     p.add_argument("--verbose_retriever", action="store_true", help="Enable verbose cache logs for retriever")
+    p.add_argument("--pretty", action="store_true", help="Pretty-print retrieval results with citations and URLs")
     return p.parse_args()
 
 
@@ -65,6 +66,30 @@ def main() -> None:
     if args.device:
         model = model.to(args.device)
 
+    def _fmt_citation(meta: Dict) -> str:
+        src = meta.get("source", "")
+        ch = meta.get("chunk_index", "")
+        return f"[{src}#{ch}]"
+
+    def _pretty_print(question: str, tier: str, items: List[Dict]) -> None:
+        if not items:
+            print(f"\n{tier}: (no results)")
+            return
+        print(f"\n{tier} (top {len(items)}):")
+        for i, it in enumerate(items, start=1):
+            meta = it.get("metadata", {})
+            url = meta.get("url", "")
+            cite = _fmt_citation(meta)
+            score = it.get("score", 0.0)
+            snippet = (it.get("text", "") or "").strip().replace("\n", " ")
+            if len(snippet) > 200:
+                snippet = snippet[:200] + "..."
+            print(f"  {i:>2}. {cite} score={score:.3f}")
+            if url:
+                print(f"      URL: {url}")
+            if snippet:
+                print(f"      {snippet}")
+
     def answer_for_question(question: str) -> Dict:
         out: Dict = retriever.retrieve_auto(question, k_final=args.k_final, top_n_rerank=args.top_n_rerank)
         ctx_t1 = retriever.build_context(out["tier1"], max_chars=3500)
@@ -83,12 +108,33 @@ def main() -> None:
             ans_t2 = tokenizer.decode(gen2[0], skip_special_tokens=True)
             ans_t2 = ans_t2[len(tokenizer.decode(inputs2.input_ids[0], skip_special_tokens=True)) :].strip()
 
+        if args.pretty:
+            print("\n=== Question ===")
+            print(question)
+            timing = out.get("timing", {})
+            if timing:
+                print("\nTimings (ms): dense={:.1f} sparse={:.1f} fusion={:.1f} rerank={:.1f} total={:.1f}".format(
+                    float(timing.get("dense_ms", 0.0)),
+                    float(timing.get("sparse_ms", 0.0)),
+                    float(timing.get("fusion_ms", 0.0)),
+                    float(timing.get("rerank_ms", 0.0)),
+                    float(timing.get("total_ms", 0.0)),
+                ))
+            _pretty_print(question, "Tier1", out.get("tier1", []))
+            if out.get("tier2_activated"):
+                _pretty_print(question, "Tier2 (reranked)", out.get("tier2", []))
+            print("\n=== Answers ===")
+            print("Tier1:", ans_t1)
+            if ans_t2 is not None:
+                print("\nTier2:", ans_t2)
+
         return {
             "question": question,
             "tier1_answer": ans_t1,
             "tier2_answer": ans_t2,
             "tier2_activated": out.get("tier2_activated"),
             "tier2_reasons": out.get("tier2_reasons"),
+            "timing": out.get("timing"),
         }
 
     results = []

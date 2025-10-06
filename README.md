@@ -103,7 +103,7 @@ Why: Hybrid retrieval captures both meaning (e.g., "contract termination") and e
 
 Implementation specifics:
 
-- Chunking defaults: 500 words per chunk with ~80-word overlap (≈700–1,000 tokens; overlap ≈100–150 tokens). Use these values in demos for better re-ranking.
+- Chunking defaults: 500 words per chunk with ~80-word overlap (≈700–1,000 tokens; overlap ≈100–150 tokens). Use these values in demos for better re-ranking. You can override via `scripts/scrape_and_chunk.py --chunk_size 500 --chunk_overlap 80`.
 - E5 prompt formatting: We prefix chunks with "passage: " when indexing and queries with "query: " at retrieval (shown in code refs below).
 - Score normalization: Before fusion, we apply min–max normalization separately to dense and sparse score lists; then fuse via `final = α * dense_norm + (1 − α) * sparse_norm`.
 
@@ -172,6 +172,37 @@ The runner:
 - Uses `retrieve_auto` to decide Tier 2 activation
 - Builds context(s) and generates with the chosen LLM
 - Prints a JSON with Tier 1 and Tier 2 answers
+
+### Pretty Print and Timings
+
+- Enable a compact console view with citations and URLs plus per-stage timings:
+
+```bash
+python scripts/main.py --queries data/queries.json --pretty
+```
+
+Output includes:
+- Tier1 and Tier2 rows: `[source#chunk] score=...` and `URL`
+- Timings (ms) for dense, sparse, fusion, rerank, total
+
+### Retrieval Evaluation (Recall@k, MRR)
+
+Use the evaluation script to compare Tier1 vs Tier2 on a labeled set.
+
+Inputs:
+- Queries JSON: `{ "queries": [{ "id": "Q1", "question": "..." }, ...] }`
+- Labels CSV: columns `query_id,relevant_doc_ids` where `relevant_doc_ids` is a comma-separated list of integer `chunk_index` values.
+
+Run:
+
+```bash
+python scripts/eval_retrieval.py \
+  --queries_json data/queries.json \
+  --labels_csv data/labels.csv \
+  --k 10
+```
+
+This prints aggregate `Recall@k` and `MRR@k` for Tier1 and Tier2 and per-query breakdown.
 
 ### Step 6: Evaluation & Demonstration
 
